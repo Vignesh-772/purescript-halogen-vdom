@@ -125,52 +125,45 @@ exports.setTextContent = function (s, n) {
 
 exports.createElement = function (ns, name, doc) {
   return function () {
-    return {type: name, children: [], props: {}, __ref: window.createPrestoElement()}
+    return { type: name, children: [], props: {}, id: window.__PRESTO_ID++, __ref: { __id: window.__PRESTO_ID} };
   };
 };
 
-exports.insertChildIx = function (type, i, a, b) {
+exports.insertChildIx = function (type, i, child, parent) {
   return function () {
-    var n = (b.children[i]) || {props: {id: "-1"}};
-
-    if (n.props.id !== a.props.id) {
+    const oldChild = parent.children[i];
+    if (oldChild !== child) {
       if (type == "patch") {
-        window.addChild(a, b, i);
+        window.addChild(child, parent, i);
       }
-
-      a.parentNode = b;
-      b.children.splice(i, 0, a);
+      child.parentNode = parent;
+      parent.children.splice(i, 0, child);
     }
   };
 };
 
-exports.removeChild = function (a, b) {
+function nullifyParent(children) {
+  children.forEach(function (child) {
+    child.parentNode = null;
+    nullifyParent(child.children);
+  })
+}
+
+exports.removeChild = function (child, parent) {
   return function () {
-    var childIndex = -1;
-
-    if (b && a.parentNode.props.id === b.props.id) {
-      for (var i=0; i<b.children.length; i++) {
-        if (b.children[i].props.id == a.props.id) {
-          childIndex = i;
-        }
-      }
-    }
-
-    if (childIndex > -1) {
-      window.removeChild(a, b, childIndex);
-      a.props.__removed = true;
-      b.children.splice(childIndex, 1);
+    if (parent && parent.parentNode && child.parentNode === parent) {
+      const index = parent.children.indexOf(child);
+      window.removeChild(child);
+      child.parentNode = null;
+      nullifyParent(child.children);
+      child.children.splice(0);
+      parent.children.splice(index, 1);
     }
   };
 };
 
 exports.unsafeParent = function (a) {
-  if (a.parentNode.props.__removed) {
-    a.props.__removed = true;
-    return null;
-  } else {
-    return a.parentNode;
-  }
+  return a.parentNode;
 };
 
 exports.setAttribute = function (ns, attr, val, el) {
