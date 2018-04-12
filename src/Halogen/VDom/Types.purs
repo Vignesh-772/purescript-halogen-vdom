@@ -25,19 +25,16 @@ import Unsafe.Coerce (unsafeCoerce)
 -- | The `Grafted` constructor and associated machinery enables `bimap`
 -- | fusion using a Coyoneda-like encoding.
 data VDom a w
-  = Text String
-  | Elem (ElemSpec a) (Array (VDom a w))
+  = Elem (ElemSpec a) (Array (VDom a w))
   | Keyed (ElemSpec a) (Array (Tuple String (VDom a w)))
   | Widget w
   | Grafted (Graft a w)
 
 instance functorVDom ∷ Functor (VDom a) where
-  map g (Text a) = Text a
   map g (Grafted a) = Grafted (map g a)
   map g a = Grafted (graft (Graft id g a))
 
 instance bifunctorVDom ∷ Bifunctor VDom where
-  bimap f g (Text a) = Text a
   bimap f g (Grafted a) = Grafted (bimap f g a)
   bimap f g a = Grafted (graft (Graft f g a))
 
@@ -72,7 +69,6 @@ runGraft
 runGraft =
   unGraft \(Graft fa fw v) →
     let
-      go (Text s) = Text s
       go (Elem spec ch) = Elem (map fa spec) (map go ch)
       go (Keyed spec ch) = Keyed (map fa spec) (map (map go) ch)
       go (Widget w) = Widget (fw w)

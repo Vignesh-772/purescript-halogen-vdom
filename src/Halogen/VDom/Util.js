@@ -123,45 +123,6 @@ exports.setTextContent = function (s, n) {
   };
 };
 
-exports.createElement = function (ns, name, doc) {
-  return function () {
-    return { type: name, children: [], props: {}, id: window.__PRESTO_ID++, __ref: { __id: window.__PRESTO_ID} };
-  };
-};
-
-exports.insertChildIx = function (type, i, child, parent) {
-  return function () {
-    const oldChild = parent.children[i];
-    if (oldChild !== child) {
-      if (type == "patch") {
-        window.addChild(child, parent, i);
-      }
-      child.parentNode = parent;
-      parent.children.splice(i, 0, child);
-    }
-  };
-};
-
-function nullifyParent(children) {
-  children.forEach(function (child) {
-    child.parentNode = null;
-    nullifyParent(child.children);
-  })
-}
-
-exports.removeChild = function (child, parent) {
-  return function () {
-    if (parent && parent.parentNode && child.parentNode === parent) {
-      const index = parent.children.indexOf(child);
-      window.removeChild(child);
-      child.parentNode = null;
-      nullifyParent(child.children);
-      child.children.splice(0);
-      parent.children.splice(index, 1);
-    }
-  };
-};
-
 exports.unsafeParent = function (a) {
   return a.parentNode;
 };

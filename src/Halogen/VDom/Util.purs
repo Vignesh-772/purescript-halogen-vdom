@@ -20,9 +20,6 @@ module Halogen.VDom.Util
   , refEq
   , createTextNode
   , setTextContent
-  , createElement
-  , insertChildIx
-  , removeChild
   , unsafeParent
   , setAttribute
   , removeAttribute
@@ -142,18 +139,6 @@ foreign import createTextNode
 foreign import setTextContent
   ∷ ∀ eff
   . Fn.Fn2 String DOM.Node (Eff (dom ∷ DOM | eff) Unit)
-
-foreign import createElement
-  ∷ ∀ eff
-  . Fn.Fn3 (Nullable Namespace) ElemName DOM.Document (Eff (dom ∷ DOM | eff) DOM.Element)
-
-foreign import insertChildIx
-  ∷ ∀ eff
-  . Fn.Fn4 String Int DOM.Node DOM.Node (Eff (dom ∷ DOM | eff) Unit)
-
-foreign import removeChild
-  ∷ ∀ eff
-  . Fn.Fn2 DOM.Node DOM.Node (Eff (dom ∷ DOM | eff) Unit)
 
 foreign import unsafeParent
   ∷ DOM.Node → DOM.Node
