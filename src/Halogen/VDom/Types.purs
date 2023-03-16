@@ -20,6 +20,7 @@ import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype)
 import Data.Tuple (Tuple)
 import Unsafe.Coerce (unsafeCoerce)
+import Foreign (Foreign)
 
 -- | The core virtual-dom tree type, where `a` is the type of attributes,
 -- | and `w` is the type of "widgets". Widgets are machines that have complete
@@ -35,14 +36,15 @@ data VDom a w
   | Widget w
   | Grafted (Graft a w)
   | Microapp String a (Maybe (Array (VDom a w)))
+  | SubScreen Foreign (VDom a w)
 
 instance functorVDom ∷ Functor (VDom a) where
-  map _ (Text a) = Text a
+  map g (Text a) = Text a
   map g (Grafted a) = Grafted (map g a)
   map g a = Grafted (graft (Graft identity g a))
 
 instance bifunctorVDom ∷ Bifunctor VDom where
-  bimap _ _ (Text a) = Text a
+  bimap f g (Text a) = Text a
   bimap f g (Grafted a) = Grafted (bimap f g a)
   bimap f g a = Grafted (graft (Graft f g a))
 
@@ -87,6 +89,7 @@ runGraft =
           Just ch -> (Just $ map go ch)
           _ -> Nothing
       go (Chunk ns n a ch) = Chunk ns n (fa a) (chunkMap go ch)
+      go (SubScreen _ a) = go a 
     in
       go v
 

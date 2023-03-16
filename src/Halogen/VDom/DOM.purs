@@ -24,6 +24,7 @@ import Halogen.VDom.Util as Util
 import Web.DOM.Element (Element) as DOM
 import Web.DOM.Element as DOMElement
 import Web.DOM.Node (Node) as DOM
+import Foreign (Foreign)
 
 type VDomMachine a w = Machine (VDom a w) DOM.Node
 
@@ -32,6 +33,8 @@ type VDomStep a w = Step (VDom a w) DOM.Node
 type VDomInit i a w = EFn.EffectFn1 i (VDomStep a w)
 
 type VDomBuilder i a w = EFn.EffectFn3 (VDomSpec a w) (VDomMachine a w) i (VDomStep a w)
+
+type VDomBuilder3 i j k a w = EFn.EffectFn3 i j k (VDomStep a w)
 
 type VDomBuilder4 i j k l a w = EFn.EffectFn6 (VDomSpec a w) (VDomMachine a w) i j k l (VDomStep a w)
 
@@ -67,6 +70,7 @@ buildVDom spec = build
     Widget w → EFn.runEffectFn3 buildWidget spec build w
     Grafted g → EFn.runEffectFn1 build (runGraft g)
     Microapp s g ch → EFn.runEffectFn5 buildMicroapp spec build s g ch
+    SubScreen s a -> EFn.runEffectFn4 buildSubScreen spec build a s
 
 type MicroAppState a w =
   { build ∷ VDomMachine a w
@@ -96,7 +100,7 @@ buildMicroapp = EFn.mkEffectFn5 \(VDomSpec spec) build s as1 ch → do
 
 patchMicroapp ∷ ∀ a w. FnObject -> EFn.EffectFn2 (MicroAppState a w) (VDom a w) (VDomStep a w)
 patchMicroapp fnObject = EFn.mkEffectFn2 \state vdom → do
-  let { build, node, attrs, service: value1, children : ch1} = state
+  let { build, node, attrs, service: value1, requestId, payload, children : ch1} = state
   case vdom of
     Grafted g →
       EFn.runEffectFn2 (patchMicroapp fnObject) state (runGraft g)
@@ -107,7 +111,7 @@ patchMicroapp fnObject = EFn.mkEffectFn2 \state vdom → do
               res ← EFn.runEffectFn2 step s v
               EFn.runEffectFn6 Util.insertChildIx obj "patch" ix (extract res) node ""
               pure res
-            onThis = EFn.mkEffectFn3 \_ _ s → EFn.runEffectFn1 halt s
+            onThis = EFn.mkEffectFn3 \obj ix s → EFn.runEffectFn1 halt s
             onThat = EFn.mkEffectFn3 \obj ix v → do
               res ← EFn.runEffectFn1 build v
               EFn.runEffectFn6 Util.insertChildIx obj "patch" ix (extract res) node ""
@@ -137,11 +141,39 @@ type TextState a w =
   , value ∷ String
   }
 
+type SubScreenState a w =
+  { build ∷ VDomMachine a w
+  , node ∷ DOM.Node
+  }
+
 buildText ∷ ∀ a w. VDomBuilder String a w
 buildText = EFn.mkEffectFn3 \(VDomSpec spec) build s → do
   node ← EFn.runEffectFn1 Util.createTextNode s
   let state = { build, node, value: s }
   pure $ mkStep $ Step node state (patchText spec.fnObject) (haltText spec.fnObject)
+
+buildSubScreen :: ∀ a w. VDomBuilder6 (VDom a w) Foreign a w
+buildSubScreen = EFn.mkEffectFn4 \spec@(VDomSpec {fnObject}) build vDom screen -> do
+    machine <- EFn.runEffectFn1 (buildVDom spec) vDom
+    el <- EFn.runEffectFn3 Util.createSubScreen fnObject machine screen
+    let node = DOMElement.toNode el
+    pure $ mkStep $ Step node {build, node} (patchSubScreen fnObject) (haltSubScreen fnObject)
+
+
+patchSubScreen ∷ ∀ a w. FnObject -> EFn.EffectFn2 (SubScreenState a w) (VDom a w) (VDomStep a w)
+patchSubScreen fnObject = EFn.mkEffectFn2 \state vdom → do
+  let {node,build} = state
+  case vdom of
+    (SubScreen _ a) -> pure $ mkStep $ Step node state (patchSubScreen fnObject) (haltSubScreen fnObject)
+    _ → do
+      EFn.runEffectFn1 (haltSubScreen fnObject) state
+      EFn.runEffectFn1 build vdom
+
+haltSubScreen ∷ ∀ a w. FnObject -> EFn.EffectFn1 (SubScreenState a w) Unit
+haltSubScreen fnObject = EFn.mkEffectFn1 \_ → do
+  pure unit
+  -- parent ← EFn.runEffectFn1 Util.parentNode node
+  -- EFn.runEffectFn3 Util.removeChild fnObject node parent
 
 patchText ∷ ∀ a w. FnObject -> EFn.EffectFn2 (TextState a w) (VDom a w) (VDomStep a w)
 patchText fnObject = EFn.mkEffectFn2 \state vdom → do
@@ -222,7 +254,7 @@ patchElem fnObject = EFn.mkEffectFn2 \state vdom → do
               res ← EFn.runEffectFn2 step s v
               EFn.runEffectFn6 Util.insertChildIx obj "patch" ix (extract res) node ""
               pure res
-            onThis = EFn.mkEffectFn3 \_ _ s → EFn.runEffectFn1 halt s
+            onThis = EFn.mkEffectFn3 \obj ix s → EFn.runEffectFn1 halt s
             onThat = EFn.mkEffectFn3 \obj ix v → do
               res ← EFn.runEffectFn1 build v
               EFn.runEffectFn6 Util.insertChildIx obj "patch" ix (extract res) node ""
@@ -310,7 +342,7 @@ patchKeyed fnObject = EFn.mkEffectFn2 \state vdom → do
               res ← EFn.runEffectFn2 step s v
               EFn.runEffectFn6 Util.insertChildIx obj "patch" ix' (extract res) node k
               pure res
-            onThis = EFn.mkEffectFn3 \_ _ s → EFn.runEffectFn1 halt s
+            onThis = EFn.mkEffectFn3 \obj _ s → EFn.runEffectFn1 halt s
             onThat = EFn.mkEffectFn4 \obj k ix (Tuple _ v) → do
               res ← EFn.runEffectFn1 build v
               EFn.runEffectFn6 Util.insertChildIx obj "patch" ix (extract res) node k
@@ -348,7 +380,7 @@ buildWidget ∷ ∀ a w. VDomBuilder w a w
 buildWidget = EFn.mkEffectFn3 \(VDomSpec spec) build w → do
   res ← EFn.runEffectFn1 (spec.buildWidget (VDomSpec spec)) w
   let
-    res' = res # unStep \(Step n _ _ _) →
+    res' = res # unStep \(Step n s k1 k2) →
       mkStep $ Step n { build, widget: res } patchWidget haltWidget
   pure res'
 
@@ -361,7 +393,7 @@ patchWidget = EFn.mkEffectFn2 \state vdom → do
     Widget w → do
       res ← EFn.runEffectFn2 step widget w
       let
-        res' = res # unStep \(Step n _ _ _) →
+        res' = res # unStep \(Step n s k1 k2) →
           mkStep $ Step n { build, widget: res } patchWidget haltWidget
       pure res'
     _ → do
@@ -433,13 +465,13 @@ patchChunk fnObject = EFn.mkEffectFn2 \state vdom → do
               let res = { shimmer: (extract s), layout: (extract res2) }
               EFn.runEffectFn5 Util.insertChunkIx obj "patch" ix res node
               pure { shimmer: s, layout: res2 }
-            onThis = EFn.mkEffectFn3 \_ _ s → EFn.runEffectFn1 halt s
+            onThis = EFn.mkEffectFn3 \obj ix s → EFn.runEffectFn1 halt s
             onThat = EFn.mkEffectFn3 \obj ix v → do
               res1 ← EFn.runEffectFn1 build v.shimmer
               res2 ← EFn.runEffectFn1 build v.actualLayout
-              let res = { shimmer: (extract res1), layout: (extract res2)}
+              let res = { shimmer: (extract res1), layout: (extract res2)} 
               EFn.runEffectFn5 Util.insertChunkIx obj "patch" ix res node
-              pure { shimmer: res1, layout: res2 }
+              pure { shimmer: res1, layout: res2 } 
           children2 ← EFn.runEffectFn6 Util.diffChunkWithIxE fnObject ch1 ch2 onThese onThis onThat
           attrs2 ← EFn.runEffectFn2 step attrs as2
           let
@@ -457,7 +489,7 @@ patchChunk fnObject = EFn.mkEffectFn2 \state vdom → do
       EFn.runEffectFn1 build vdom
 
 haltChunk ∷ ∀ a w. FnObject -> EFn.EffectFn1 (ChunkState a w) Unit
-haltChunk _ = EFn.mkEffectFn1 \_ → do
+haltChunk fnObject = EFn.mkEffectFn1 \{ node, attrs, children } → do
   pure unit
 
 eqElemSpec ∷ Fn.Fn4 (Maybe Namespace) ElemName (Maybe Namespace) ElemName Boolean
@@ -468,3 +500,4 @@ eqElemSpec = Fn.mkFn4 \ns1 (ElemName name1) ns2 (ElemName name2) →
       Nothing, Nothing → true
       _, _ → false
     else false
+    

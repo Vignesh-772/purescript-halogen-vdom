@@ -1,5 +1,6 @@
+"use strict";
 
-export const eqPropValues = function (x) {
+exports.eqPropValues = function (x) {
   return function (y){
     return x == y;
   };
