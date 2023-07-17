@@ -21,7 +21,7 @@ import Effect.Ref as Ref
 import Effect.Uncurried as EFn
 import Foreign (typeOf)
 import Foreign.Object as Object
-import Halogen.VDom as V
+import Halogen.VDom.Machine as V
 import Halogen.VDom.Machine (Step'(..), mkStep)
 import Halogen.VDom.Types (Namespace(..), FnObject)
 import Halogen.VDom.Util as Util

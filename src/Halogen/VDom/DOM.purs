@@ -17,10 +17,12 @@ import Data.Tuple (Tuple(..), fst)
 import Effect.Uncurried as EFn
 import Foreign (Foreign)
 import Foreign.Object as Object
+import Halogen.VDom.DOM.Prop (Prop(..))
 import Halogen.VDom.Machine (Machine, Step, Step'(..), extract, halt, mkStep, step, unStep)
 import Halogen.VDom.Machine as Machine
 import Halogen.VDom.Types (ElemName(..), FnObject, Namespace(..), ShimmerHolder, VDom(..), runGraft)
 import Halogen.VDom.Util as Util
+import Unsafe.Coerce (unsafeCoerce)
 import Web.DOM.Element (Element) as DOM
 import Web.DOM.Element as DOMElement
 import Web.DOM.Node (Node) as DOM
@@ -165,91 +167,6 @@ haltText fnObject = EFn.mkEffectFn1 \{ node } → do
   parent ← EFn.runEffectFn1 Util.parentNode node
   EFn.runEffectFn3 Util.removeChild fnObject node parent
 
-type ElemState a w =
-  { build ∷ VDomMachine a w
-  , node ∷ DOM.Node
-  , attrs ∷ Step a Unit
-  , ns ∷ Maybe Namespace
-  , name ∷ ElemName
-  , children ∷ Array (VDomStep a w)
-  }
-
-buildElem ∷ ∀ a w. VDomBuilder4 (Maybe Namespace) ElemName a (Array (VDom a w)) a w
-buildElem = EFn.mkEffectFn6 \(VDomSpec spec) build ns1 name1 as1 ch1 → do
-  el ← EFn.runEffectFn4 Util.createElement spec.fnObject (toNullable ns1) name1 "elem"
-  let
-    node = DOMElement.toNode el
-    onChild = EFn.mkEffectFn2 \ix child → do
-      res ← EFn.runEffectFn1 build child
-      EFn.runEffectFn6 Util.insertChildIx spec.fnObject "render" ix (extract res) node ""
-      pure res
-  children ← EFn.runEffectFn2 Util.forE ch1 onChild
-  attrs ← EFn.runEffectFn1 (spec.buildAttributes spec.fnObject el) as1
-  let
-    state =
-      { build
-      , node
-      , attrs
-      , ns: ns1
-      , name: name1
-      , children
-      }
-  pure $ mkStep $ Step node state (patchElem spec.fnObject) (haltElem spec.fnObject)
-
-patchElem ∷ ∀ a w. FnObject -> EFn.EffectFn2 (ElemState a w) (VDom a w) (VDomStep a w)
-patchElem fnObject = EFn.mkEffectFn2 \state vdom → do
-  let { build, node, attrs, ns: ns1, name: name1, children: ch1 } = state
-  case vdom of
-    Grafted g →
-      EFn.runEffectFn2 (patchElem fnObject) state (runGraft g)
-    Elem ns2 name2 as2 ch2 | Fn.runFn4 eqElemSpec ns1 name1 ns2 name2 → do
-      case Array.length ch1, Array.length ch2 of
-        0, 0 → do
-          attrs2 ← EFn.runEffectFn2 step attrs as2
-          let
-            nextState =
-              { build
-              , node
-              , attrs: attrs2
-              , ns: ns2
-              , name: name2
-              , children: ch1
-              }
-          pure $ mkStep $ Step node nextState (patchElem fnObject) (haltElem fnObject)
-        _, _ → do
-          let
-            onThese = EFn.mkEffectFn4 \obj ix s v → do
-              res ← EFn.runEffectFn2 step s v
-              EFn.runEffectFn6 Util.insertChildIx obj "patch" ix (extract res) node ""
-              pure res
-            onThis = EFn.mkEffectFn3 \_ _ s → EFn.runEffectFn1 halt s
-            onThat = EFn.mkEffectFn3 \obj ix v → do
-              res ← EFn.runEffectFn1 build v
-              EFn.runEffectFn6 Util.insertChildIx obj "patch" ix (extract res) node ""
-              pure res
-          children2 ← EFn.runEffectFn6 Util.diffWithIxE fnObject ch1 ch2 onThese onThis onThat
-          attrs2 ← EFn.runEffectFn2 step attrs as2
-          let
-            nextState =
-              { build
-              , node
-              , attrs: attrs2
-              , ns: ns2
-              , name: name2
-              , children: children2
-              }
-          pure $ mkStep $ Step node nextState (patchElem fnObject) (haltElem fnObject)
-    _ → do
-      EFn.runEffectFn1 (haltElem fnObject) state
-      EFn.runEffectFn1 build vdom
-
-haltElem ∷ ∀ a w. FnObject -> EFn.EffectFn1 (ElemState a w) Unit
-haltElem fnObject = EFn.mkEffectFn1 \{ node, attrs, children } → do
-  parent ← EFn.runEffectFn1 Util.parentNode node
-  EFn.runEffectFn3 Util.removeChild fnObject node parent
-  EFn.runEffectFn2 Util.forEachE children halt
-  EFn.runEffectFn1 halt attrs
-
 type KeyedState a w =
   { build ∷ VDomMachine a w
   , node ∷ DOM.Node
@@ -260,6 +177,23 @@ type KeyedState a w =
   , length ∷ Int
   }
 
+buildElem ∷ ∀ a w. VDomBuilder4 (Maybe Namespace) ElemName a (Array (VDom a w)) a w
+buildElem = EFn.mkEffectFn6 \spec build ns1 name1 as1 ch1 → do
+  EFn.runEffectFn6 buildKeyed spec build ns1 name1 as1 (Array.mapWithIndex (\i a -> Tuple (show i) a) ch1)
+
+isVisibilityGone :: forall a. Array (Prop a) -> Boolean
+isVisibilityGone = Array.any ( case _ of
+    Property "visibility" x -> unsafeCoerce x == "gone"
+    _ -> false
+  )
+
+filterGoneNodes :: forall a w. Array (Tuple String (VDom a w)) -> Array (Tuple String (VDom a w))
+filterGoneNodes = Array.filter ( not <<< case _ of
+    Tuple _ (Elem _ _ props _) -> isVisibilityGone (unsafeCoerce props)
+    Tuple _ (Keyed _ _ props _) -> isVisibilityGone (unsafeCoerce props)
+    _ -> false
+  )
+
 buildKeyed ∷ ∀ a w. VDomBuilder4 (Maybe Namespace) ElemName a (Array (Tuple String (VDom a w))) a w
 buildKeyed = EFn.mkEffectFn6 \(VDomSpec spec) build ns1 name1 as1 ch1 → do
   el ← EFn.runEffectFn4 Util.createElement spec.fnObject (toNullable ns1) name1 "keyed"
@@ -269,7 +203,13 @@ buildKeyed = EFn.mkEffectFn6 \(VDomSpec spec) build ns1 name1 as1 ch1 → do
       res ← EFn.runEffectFn1 build vdom
       EFn.runEffectFn6 Util.insertChildIx spec.fnObject "render" ix (extract res) node k
       pure res
-  children ← EFn.runEffectFn3 Util.strMapWithIxE ch1 fst onChild
+
+  -- Visibility Check logic
+    -- loop on children to find which nodes to eliminate
+    -- eliminate nodes where there is property visibility with value gone
+  let ch2 = filterGoneNodes ch1
+
+  children ← EFn.runEffectFn3 Util.strMapWithIxE ch2 fst onChild
   attrs ← EFn.runEffectFn1 (spec.buildAttributes spec.fnObject el) as1
   let
     state =
@@ -279,55 +219,61 @@ buildKeyed = EFn.mkEffectFn6 \(VDomSpec spec) build ns1 name1 as1 ch1 → do
       , ns: ns1
       , name: name1
       , children
-      , length: Array.length ch1
+      , length: Array.length ch2
       }
   pure $ mkStep $ Step node state (patchKeyed spec.fnObject) (haltKeyed spec.fnObject)
 
 patchKeyed ∷ ∀ a w. FnObject -> EFn.EffectFn2 (KeyedState a w) (VDom a w) (VDomStep a w)
 patchKeyed fnObject = EFn.mkEffectFn2 \state vdom → do
   let { build, node, attrs, ns: ns1, name: name1, children: ch1, length: len1 } = state
+  let patchFunc = EFn.mkEffectFn4 \ns2 name2 as2 ch0 ->  do
+        let ch2 = filterGoneNodes ch0
+        case len1, Array.length ch2 of
+          0, 0 → do
+            attrs2 ← EFn.runEffectFn2 Machine.step attrs as2
+            let
+              nextState =
+                { build
+                , node
+                , attrs: attrs2
+                , ns: ns2
+                , name: name2
+                , children: ch1
+                , length: 0
+                }
+            pure $ mkStep $ Step node nextState (patchKeyed fnObject) (haltKeyed fnObject)
+          _, len2 → do
+            let
+              onThese = EFn.mkEffectFn5 \obj k ix' s (Tuple _ v) → do
+                res ← EFn.runEffectFn2 step s v
+                EFn.runEffectFn6 Util.insertChildIx obj "patch" ix' (extract res) node k
+                pure res
+              onThis = EFn.mkEffectFn3 \_ _ s → EFn.runEffectFn1 halt s
+              onThat = EFn.mkEffectFn4 \obj k ix (Tuple _ v) → do
+                res ← EFn.runEffectFn1 build v
+                EFn.runEffectFn6 Util.insertChildIx obj "patch" ix (extract res) node k
+                pure res
+            children2 ← EFn.runEffectFn7 Util.diffWithKeyAndIxE fnObject ch1 ch2 fst onThese onThis onThat
+            attrs2 ← EFn.runEffectFn2 step attrs as2
+            let
+              nextState =
+                { build
+                , node
+                , attrs: attrs2
+                , ns: ns2
+                , name: name2
+                , children: children2
+                , length: len2
+                }
+            pure $ mkStep $ Step node nextState (patchKeyed fnObject) (haltKeyed fnObject)
+
   case vdom of
     Grafted g →
       EFn.runEffectFn2 (patchKeyed fnObject) state (runGraft g)
+    Elem ns2 name2 as2 ch3 | Fn.runFn4 eqElemSpec ns1 name1 ns2 name2 →
+      EFn.runEffectFn4 patchFunc ns2 name2 as2 (Array.mapWithIndex (\i a -> Tuple (show i) a) ch3)
     Keyed ns2 name2 as2 ch2 | Fn.runFn4 eqElemSpec ns1 name1 ns2 name2 →
-      case len1, Array.length ch2 of
-        0, 0 → do
-          attrs2 ← EFn.runEffectFn2 Machine.step attrs as2
-          let
-            nextState =
-              { build
-              , node
-              , attrs: attrs2
-              , ns: ns2
-              , name: name2
-              , children: ch1
-              , length: 0
-              }
-          pure $ mkStep $ Step node nextState (patchKeyed fnObject) (haltKeyed fnObject)
-        _, len2 → do
-          let
-            onThese = EFn.mkEffectFn5 \obj k ix' s (Tuple _ v) → do
-              res ← EFn.runEffectFn2 step s v
-              EFn.runEffectFn6 Util.insertChildIx obj "patch" ix' (extract res) node k
-              pure res
-            onThis = EFn.mkEffectFn3 \_ _ s → EFn.runEffectFn1 halt s
-            onThat = EFn.mkEffectFn4 \obj k ix (Tuple _ v) → do
-              res ← EFn.runEffectFn1 build v
-              EFn.runEffectFn6 Util.insertChildIx obj "patch" ix (extract res) node k
-              pure res
-          children2 ← EFn.runEffectFn7 Util.diffWithKeyAndIxE fnObject ch1 ch2 fst onThese onThis onThat
-          attrs2 ← EFn.runEffectFn2 step attrs as2
-          let
-            nextState =
-              { build
-              , node
-              , attrs: attrs2
-              , ns: ns2
-              , name: name2
-              , children: children2
-              , length: len2
-              }
-          pure $ mkStep $ Step node nextState (patchKeyed fnObject) (haltKeyed fnObject)
+      EFn.runEffectFn4 patchFunc ns2 name2 as2 ch2
     _ → do
       EFn.runEffectFn1 (haltKeyed fnObject) state
       EFn.runEffectFn1 build vdom
