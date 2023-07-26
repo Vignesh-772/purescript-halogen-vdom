@@ -359,3 +359,37 @@ export const generateUUID = function() {
   return s4() + s4() + "-" + s4() + "-" + s4() + "-" +
           s4() + "-" + s4() + s4() + s4();
 };
+
+
+function deepCompare(obj1, obj2) {
+  if (typeof obj1 !== typeof obj2) {
+    return false;
+  }
+
+  if (typeof obj1 === "object" && obj1 !== null && obj2 !== null) {
+    if (Object.keys(obj1).length !== Object.keys(obj2).length) {
+      return false;
+    }
+
+    for (const key in obj1) {
+      if (!obj2[key]) {
+        return false;
+      }
+
+      if (!deepCompare(obj1[key], obj2[key])) {
+        return false;
+      }
+    }
+
+    return true;
+  } else {
+    return obj1 === obj2;
+  }
+}
+
+
+export const isStateChanged = function(oldState) {
+  return function (newState) {
+    return deepCompare(oldState, newState);
+  }
+}

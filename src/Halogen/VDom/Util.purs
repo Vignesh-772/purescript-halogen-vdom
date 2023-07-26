@@ -38,6 +38,7 @@ module Halogen.VDom.Util
   , jsUndefined
   , createChunkedElement
   , diffChunkWithIxE
+  , isStateChanged
   ) where
 
 import Prelude
@@ -234,4 +235,6 @@ foreign import removeEventListener
 foreign import data JsUndefined ∷ Type
 
 foreign import jsUndefined ∷ JsUndefined
+
+foreign import isStateChanged :: forall a. a -> a -> Boolean
 

@@ -10,6 +10,8 @@ module Halogen.VDom.Types
   , FnObject(..)
   , ShimmerHolder(..)
   , ShimmerItem(..)
+  , State1(..)
+  , State2(..)
   ) where
 
 import Prelude
@@ -27,11 +29,17 @@ import Unsafe.Coerce (unsafeCoerce)
 -- |
 -- | The `Grafted` constructor and associated machinery enables `bimap`
 -- | fusion using a Coyoneda-like encoding.
+type State1 a w = forall st. State2 st a w
+
+data State2 st a w = State2 st (st -> VDom a w)
+
+
 data VDom a w
   = Text String
   | Elem (Maybe Namespace) ElemName a (Array (VDom a w))
   | Chunk (Maybe Namespace) ElemName a (ShimmerHolder a w)
   | Keyed (Maybe Namespace) ElemName a (Array (Tuple String (VDom a w)))
+  | PartialLayout (State1 a w)-- State (State -> VDom a w)
   | Widget w
   | Grafted (Graft a w)
   | Microapp String a (Maybe (Array (VDom a w)))
@@ -81,6 +89,7 @@ runGraft =
       go (Elem ns n a ch) = Elem ns n (fa a) (map go ch)
       go (Keyed ns n a ch) = Keyed ns n (fa a) (map (map go) ch)
       go (Widget w) = Widget (fw w)
+      go (PartialLayout x) = PartialLayout (unsafeCoerce x)
       go (Grafted g) = Grafted (bimap fa fw g)
       go (Microapp s a child) = Microapp s (fa a) $
         case child of
@@ -110,8 +119,8 @@ derive newtype instance ordNamespace ∷ Ord Namespace
 
 type ShimmerHolder a w = Array (ShimmerItem a w)
 
-type ShimmerItem a w = 
-  { shimmer :: VDom a w 
+type ShimmerItem a w =
+  { shimmer :: VDom a w
   , actualLayout :: VDom a w
   }
 
