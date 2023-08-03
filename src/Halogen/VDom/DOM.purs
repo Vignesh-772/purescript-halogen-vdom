@@ -14,15 +14,15 @@ import Data.Function.Uncurried as Fn
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Nullable (toNullable)
 import Data.Tuple (Tuple(..), fst)
+import Effect.Uncurried (EffectFn3, mkEffectFn3, runEffectFn1, runEffectFn3)
 import Effect.Uncurried as EFn
 import Foreign (Foreign)
 import Foreign.Object as Object
 import Halogen.VDom.DOM.Prop (Prop(..))
 import Halogen.VDom.Machine (Machine, Step, Step'(..), extract, halt, mkStep, step, unStep)
 import Halogen.VDom.Machine as Machine
-import Halogen.VDom.Types (ElemName(..), FnObject, Namespace(..), ShimmerHolder, State1, State2(..), VDom(..), runGraft)
+import Halogen.VDom.Types (ElemName(..), FnObject, Namespace(..), ShimmerHolder, PartialState, PartialStateImpl(..), VDom(..), runGraft)
 import Halogen.VDom.Util as Util
-import Effect.Uncurried (EffectFn3, mkEffectFn3, runEffectFn1, runEffectFn3)
 import Unsafe.Coerce (unsafeCoerce)
 import Web.DOM.Element (Element) as DOM
 import Web.DOM.Element as DOMElement
@@ -82,140 +82,36 @@ type MicroAppState a w =
   , children :: Array (VDomStep a w)
   }
 
-buildPartialLayout :: ∀ a w. EffectFn3 (VDomSpec a w) (VDomMachine a w) (State1 a w) (VDomStep a w)
-buildPartialLayout = EFn.mkEffectFn3 \s@(VDomSpec spec) build partial  -> do
-  let (State2 st fn) =  (unsafeCoerce partial)
+buildPartialLayout :: ∀ a w. EffectFn3 (VDomSpec a w) (VDomMachine a w) (PartialState a w) (VDomStep a w)
+buildPartialLayout = EFn.mkEffectFn3 \(VDomSpec sp) build partial  -> do
+  let (PartialStateImpl st fn) =  (unsafeCoerce partial)
       e = fn st
-  case e of
-    Elem ns1 name1 as1 childrens → do
-      let ch1 = (Array.mapWithIndex (\i a -> Tuple (show i) a) childrens)
-      el ← EFn.runEffectFn4 Util.createElement spec.fnObject (toNullable ns1) name1 "keyed"
-      let
-        node = DOMElement.toNode el
-        onChild = EFn.mkEffectFn4 \k ix _ (Tuple _ vdom) → do
-          res ← EFn.runEffectFn1 build vdom
-          EFn.runEffectFn6 Util.insertChildIx spec.fnObject "render" ix (extract res) node k
-          pure res
+  buildStep <- EFn.runEffectFn1 build e
+  let (Step node state _ hFn) = unsafeCoerce buildStep
+  let shouldAddPartial =
+        case e of
+          Elem _ _ _ _ → true
+          Keyed _ _ _ _ → true
+          _ -> false
+  if shouldAddPartial
+    then pure $ mkStep $ Step node state (patchPartial (unsafeCoerce partial) sp.fnObject) hFn
+    else pure $ buildStep
 
-      -- Visibility Check logic
-        -- loop on children to find which nodes to eliminate
-        -- eliminate nodes where there is property visibility with value gone
-      let ch2 = filterGoneNodes ch1
-
-      children ← EFn.runEffectFn3 Util.strMapWithIxE ch2 fst onChild
-      attrs ← EFn.runEffectFn1 (spec.buildAttributes spec.fnObject el) as1
-      let
-        state =
-          { build
-          , node
-          , attrs
-          , ns: ns1
-          , name: name1
-          , children
-          , length: Array.length ch2
-          }
-
-      pure $ mkStep $ Step node state (patchPartial (unsafeCoerce partial) spec.fnObject) (haltKeyed spec.fnObject)
-    Text str → EFn.runEffectFn3 buildText s build str
-    Chunk ns n a ch → EFn.runEffectFn6 buildChunk s build ns n a ch
-    Keyed ns1 name1 as1 ch1 → do
-      el ← EFn.runEffectFn4 Util.createElement spec.fnObject (toNullable ns1) name1 "keyed"
-      let
-        node = DOMElement.toNode el
-        onChild = EFn.mkEffectFn4 \k ix _ (Tuple _ vdom) → do
-          res ← EFn.runEffectFn1 build vdom
-          EFn.runEffectFn6 Util.insertChildIx spec.fnObject "render" ix (extract res) node k
-          pure res
-
-      -- Visibility Check logic
-        -- loop on children to find which nodes to eliminate
-        -- eliminate nodes where there is property visibility with value gone
-      let ch2 = filterGoneNodes ch1
-
-      children ← EFn.runEffectFn3 Util.strMapWithIxE ch2 fst onChild
-      attrs ← EFn.runEffectFn1 (spec.buildAttributes spec.fnObject el) as1
-      let
-        state =
-          { build
-          , node
-          , attrs
-          , ns: ns1
-          , name: name1
-          , children
-          , length: Array.length ch2
-          }
-
-      pure $ mkStep $ Step node state (patchPartial (unsafeCoerce partial) spec.fnObject) (haltKeyed spec.fnObject)
-    Widget w → EFn.runEffectFn3 buildWidget s build w
-    PartialLayout _ -> runEffectFn1 build e
-    Grafted g → EFn.runEffectFn1 build (runGraft g)
-    Microapp str g ch → EFn.runEffectFn5 buildMicroapp s build str g ch
-
-patchPartialEvaluated :: ∀ a w. EFn.EffectFn3 (State1 a w) FnObject (KeyedState a w) (VDomStep a w)
+patchPartialEvaluated :: ∀ a w. EFn.EffectFn3 (PartialState a w) FnObject (KeyedState a w) (VDomStep a w)
 patchPartialEvaluated = mkEffectFn3 \newPartial fnObject state -> do
-  let (State2 newSt fn) = (unsafeCoerce newPartial)
+  let (PartialStateImpl newSt fn) = (unsafeCoerce newPartial)
       vdom = fn newSt
-  let { build, node, attrs, ns: ns1, name: name1, children: ch1, length: len1 } = state
-  let patchFunc = EFn.mkEffectFn4 \ns2 name2 as2 ch0 ->  do
-        let ch2 = filterGoneNodes ch0
-        case len1, Array.length ch2 of
-          0, 0 → do
-            attrs2 ← EFn.runEffectFn2 Machine.step attrs as2
-            let
-              nextState =
-                { build
-                , node
-                , attrs: attrs2
-                , ns: ns2
-                , name: name2
-                , children: ch1
-                , length: 0
-                }
-            pure $ mkStep $ Step node nextState (patchPartial (unsafeCoerce newPartial) fnObject) (haltKeyed fnObject)
-          _, len2 → do
-            let
-              onThese = EFn.mkEffectFn5 \obj k ix' s (Tuple _ v) → do
-                res ← EFn.runEffectFn2 step s v
-                EFn.runEffectFn6 Util.insertChildIx obj "patch" ix' (extract res) node k
-                pure res
-              onThis = EFn.mkEffectFn3 \_ _ s → EFn.runEffectFn1 halt s
-              onThat = EFn.mkEffectFn4 \obj k ix (Tuple _ v) → do
-                res ← EFn.runEffectFn1 build v
-                EFn.runEffectFn6 Util.insertChildIx obj "patch" ix (extract res) node k
-                pure res
-            children2 ← EFn.runEffectFn7 Util.diffWithKeyAndIxE fnObject ch1 ch2 fst onThese onThis onThat
-            attrs2 ← EFn.runEffectFn2 step attrs as2
-            let
-              nextState =
-                { build
-                , node
-                , attrs: attrs2
-                , ns: ns2
-                , name: name2
-                , children: children2
-                , length: len2
-                }
-            pure $ mkStep $ Step node nextState (patchPartial (unsafeCoerce newPartial) fnObject) (haltKeyed fnObject)
+  patchedStep <- EFn.runEffectFn2 (patchKeyed fnObject) state vdom
+  let (Step node state _ hFn) = unsafeCoerce patchedStep
+  pure $ mkStep $ Step node state (patchPartial (unsafeCoerce newPartial) fnObject) hFn
 
-  case vdom of
-    Grafted g →
-      EFn.runEffectFn2 (patchKeyed fnObject) state (runGraft g)
-    Elem ns2 name2 as2 ch3 | Fn.runFn4 eqElemSpec ns1 name1 ns2 name2 →
-      EFn.runEffectFn4 patchFunc ns2 name2 as2 (Array.mapWithIndex (\i a -> Tuple (show i) a) ch3)
-    Keyed ns2 name2 as2 ch2 | Fn.runFn4 eqElemSpec ns1 name1 ns2 name2 →
-      EFn.runEffectFn4 patchFunc ns2 name2 as2 ch2
-    _ → do
-      EFn.runEffectFn1 (haltKeyed fnObject) state
-      EFn.runEffectFn1 build vdom
-
-
-patchPartial :: ∀ a w. (State1 a w) -> FnObject -> EFn.EffectFn2 (KeyedState a w) (VDom a w) (VDomStep a w)
+patchPartial :: ∀ a w. (PartialState a w) -> FnObject -> EFn.EffectFn2 (KeyedState a w) (VDom a w) (VDomStep a w)
 patchPartial oldPartial fnObject = EFn.mkEffectFn2 \state vdom → do
   let { build, node } = state
-      (State2 oldSt _) = (unsafeCoerce oldPartial)
+      (PartialStateImpl oldSt _) = (unsafeCoerce oldPartial)
   case vdom of
     (PartialLayout x) ->
-                let (State2 st _) = (unsafeCoerce x)
+                let (PartialStateImpl st _) = (unsafeCoerce x)
                 in if not $ Util.isStateChanged oldSt st
                                 then runEffectFn3 patchPartialEvaluated (unsafeCoerce x) fnObject state
                                 else pure $ mkStep $ Step node state (patchPartial (unsafeCoerce oldPartial) fnObject) (haltKeyed fnObject)

@@ -10,8 +10,8 @@ module Halogen.VDom.Types
   , FnObject(..)
   , ShimmerHolder(..)
   , ShimmerItem(..)
-  , State1(..)
-  , State2(..)
+  , PartialState(..)
+  , PartialStateImpl(..)
   ) where
 
 import Prelude
@@ -29,9 +29,9 @@ import Unsafe.Coerce (unsafeCoerce)
 -- |
 -- | The `Grafted` constructor and associated machinery enables `bimap`
 -- | fusion using a Coyoneda-like encoding.
-type State1 a w = forall st. State2 st a w
+type PartialState a w = forall st. PartialStateImpl st a w
 
-data State2 st a w = State2 st (st -> VDom a w)
+data PartialStateImpl st a w = PartialStateImpl st (st -> VDom a w)
 
 
 data VDom a w
@@ -39,7 +39,7 @@ data VDom a w
   | Elem (Maybe Namespace) ElemName a (Array (VDom a w))
   | Chunk (Maybe Namespace) ElemName a (ShimmerHolder a w)
   | Keyed (Maybe Namespace) ElemName a (Array (Tuple String (VDom a w)))
-  | PartialLayout (State1 a w)-- State (State -> VDom a w)
+  | PartialLayout (PartialState a w)-- State (State -> VDom a w)
   | Widget w
   | Grafted (Graft a w)
   | Microapp String a (Maybe (Array (VDom a w)))
