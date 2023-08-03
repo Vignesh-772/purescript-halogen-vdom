@@ -372,7 +372,7 @@ function deepCompare(obj1, obj2) {
     }
 
     for (const key in obj1) {
-      if (!obj2[key]) {
+      if ((typeof obj2[key] === "object" && !obj2[key]) || typeof obj2[key] == "undefined") {
         return false;
       }
 

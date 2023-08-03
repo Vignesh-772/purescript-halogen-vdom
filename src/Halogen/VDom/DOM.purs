@@ -118,7 +118,34 @@ buildPartialLayout = EFn.mkEffectFn3 \s@(VDomSpec spec) build partial  -> do
       pure $ mkStep $ Step node state (patchPartial (unsafeCoerce partial) spec.fnObject) (haltKeyed spec.fnObject)
     Text str → EFn.runEffectFn3 buildText s build str
     Chunk ns n a ch → EFn.runEffectFn6 buildChunk s build ns n a ch
-    Keyed ns n a ch → EFn.runEffectFn6 buildKeyed s build ns n a ch
+    Keyed ns1 name1 as1 ch1 → do
+      el ← EFn.runEffectFn4 Util.createElement spec.fnObject (toNullable ns1) name1 "keyed"
+      let
+        node = DOMElement.toNode el
+        onChild = EFn.mkEffectFn4 \k ix _ (Tuple _ vdom) → do
+          res ← EFn.runEffectFn1 build vdom
+          EFn.runEffectFn6 Util.insertChildIx spec.fnObject "render" ix (extract res) node k
+          pure res
+
+      -- Visibility Check logic
+        -- loop on children to find which nodes to eliminate
+        -- eliminate nodes where there is property visibility with value gone
+      let ch2 = filterGoneNodes ch1
+
+      children ← EFn.runEffectFn3 Util.strMapWithIxE ch2 fst onChild
+      attrs ← EFn.runEffectFn1 (spec.buildAttributes spec.fnObject el) as1
+      let
+        state =
+          { build
+          , node
+          , attrs
+          , ns: ns1
+          , name: name1
+          , children
+          , length: Array.length ch2
+          }
+
+      pure $ mkStep $ Step node state (patchPartial (unsafeCoerce partial) spec.fnObject) (haltKeyed spec.fnObject)
     Widget w → EFn.runEffectFn3 buildWidget s build w
     PartialLayout _ -> runEffectFn1 build e
     Grafted g → EFn.runEffectFn1 build (runGraft g)
