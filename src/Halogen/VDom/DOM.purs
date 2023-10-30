@@ -224,11 +224,25 @@ isVisibilityGone = Array.any ( case _ of
     _ -> false
   )
 
+
+mapVisibilityKeepGone :: forall a. Array (Prop a) -> Array (Prop a)
+mapVisibilityKeepGone = map ( case _ of
+    Property "visibility" x -> if unsafeCoerce x == "keep_gone" then Property "visibility" (unsafeCoerce "gone") else Property "visibility" x
+    any -> any
+  )
+
 filterGoneNodes :: forall a w. Array (Tuple String (VDom a w)) -> Array (Tuple String (VDom a w))
-filterGoneNodes = Array.filter ( not <<< case _ of
+filterGoneNodes = mapKeepGoneNodes <<< Array.filter ( not <<< case _ of
     Tuple _ (Elem _ _ props _) -> isVisibilityGone (unsafeCoerce props)
     Tuple _ (Keyed _ _ props _) -> isVisibilityGone (unsafeCoerce props)
     _ -> false
+  )
+
+mapKeepGoneNodes :: forall a w. Array (Tuple String (VDom a w)) -> Array (Tuple String (VDom a w))
+mapKeepGoneNodes = map ( case _ of
+    (Tuple a (Elem b c props d)) -> Tuple a (Elem b c (unsafeCoerce $ mapVisibilityKeepGone $ unsafeCoerce props) d)
+    (Tuple a (Keyed b c props d)) -> Tuple a (Keyed b c (unsafeCoerce $ mapVisibilityKeepGone $ unsafeCoerce props) d)
+    x -> x
   )
 
 buildKeyed ∷ ∀ a w. VDomBuilder4 (Maybe Namespace) ElemName a (Array (Tuple String (VDom a w))) a w
@@ -245,7 +259,6 @@ buildKeyed = EFn.mkEffectFn6 \(VDomSpec spec) build ns1 name1 as1 ch1 → do
     -- loop on children to find which nodes to eliminate
     -- eliminate nodes where there is property visibility with value gone
   let ch2 = filterGoneNodes ch1
-
   children ← EFn.runEffectFn3 Util.strMapWithIxE ch2 fst onChild
   attrs ← EFn.runEffectFn1 (spec.buildAttributes spec.fnObject el) as1
   let
