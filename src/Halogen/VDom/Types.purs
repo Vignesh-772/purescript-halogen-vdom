@@ -20,6 +20,7 @@ import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype)
 import Data.Tuple (Tuple)
 import Unsafe.Coerce (unsafeCoerce)
+import React.Basic (JSX)
 
 -- | The core virtual-dom tree type, where `a` is the type of attributes,
 -- | and `w` is the type of "widgets". Widgets are machines that have complete
@@ -35,6 +36,7 @@ data VDom a w
   | Widget w
   | Grafted (Graft a w)
   | Microapp String a (Maybe (Array (VDom a w)))
+  | ReactElem JSX
 
 instance functorVDom ∷ Functor (VDom a) where
   map _ (Text a) = Text a
@@ -87,6 +89,7 @@ runGraft =
           Just ch -> (Just $ map go ch)
           _ -> Nothing
       go (Chunk ns n a ch) = Chunk ns n (fa a) (chunkMap go ch)
+      go (ReactElem x) = ReactElem x
     in
       go v
 

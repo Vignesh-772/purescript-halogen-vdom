@@ -67,6 +67,7 @@ buildVDom spec = build
     Widget w → EFn.runEffectFn3 buildWidget spec build w
     Grafted g → EFn.runEffectFn1 build (runGraft g)
     Microapp s g ch → EFn.runEffectFn5 buildMicroapp spec build s g ch
+    ReactElem _ -> EFn.runEffectFn3 buildText spec build "React elem is not supposed to use in Presto-dom"
 
 type MicroAppState a w =
   { build ∷ VDomMachine a w

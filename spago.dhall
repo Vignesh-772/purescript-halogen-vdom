@@ -15,6 +15,7 @@
     , "unsafe-coerce"
     , "web-dom"
     , "web-events"
+    , "react-basic"
     ]
 , packages = ./packages.dhall
 , sources = [ "src/**/*.purs" ]
